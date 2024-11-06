@@ -19,20 +19,14 @@ const db = new pg.Client({
 });
 db.connect();
 
-async function cookieAuth(req, res, next) {
-  const cookies = req.cookies;
-  if (!cookies.jwt) {
-    return res.status(400).json({ error: "No token" });
-  }
-  const userQ = await db.query(
-    `SELECT * FROM users WHERE token= '${cookies.jwt}';`
-  );
-  if (userQ.rows.length === 0) {
-    return res.status(400).json({ error: "No user with cookie token" });
-  }
-  jwt.verify(cookies.jwt, process.env.TOKEN_SECRET, (err, decoded) => {
+function verifyAccessToken(req, res, next) {
+  const authHeader = req.headers.authorization || req.headers.Authorization;
+  if (!authHeader.startsWith("Bearer "))
+    return res.status(401).json({ error: "No token provided in header" });
+  const token = authHeader.split(" ")[1];
+  jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
     if (err) {
-      return res.status(400).json({ error: "Cookie expired" });
+      return res.status(403).json({ error: "Invalid access token" });
     }
     req.user = decoded;
     next();
@@ -63,6 +57,11 @@ app.get("/leaderboard", async (req, res) => {
 });
 
 app.post("/register", async (req, res) => {
+  if (!req.body.email || !req.body.username || !req.body.password) {
+    return res
+      .status(400)
+      .json({ error: "Email, username, and password are required" });
+  }
   const checkEmail = await db.query(
     `SELECT * FROM users WHERE email = '${req.body.email}';`
   );
@@ -84,6 +83,9 @@ app.post("/register", async (req, res) => {
 });
 
 app.post("/login", async (req, res) => {
+  if (!req.body.email || !req.body.password) {
+    return res.status(400).json({ error: "Email and password are required" });
+  }
   const userQ = await db.query(
     `SELECT * FROM users WHERE email= '${req.body.email}';`
   );
@@ -99,34 +101,77 @@ app.post("/login", async (req, res) => {
       error: "Entered password does not match that of associated email",
     });
   }
-  const token = jwt.sign(
+  const accessToken = jwt.sign(
     { email: user.email, username: user.username },
-    process.env.TOKEN_SECRET,
+    process.env.ACCESS_TOKEN_SECRET,
     {
-      expiresIn: "1h",
+      expiresIn: "300s",
+    }
+  );
+  const refreshToken = jwt.sign(
+    { email: user.email, username: user.username },
+    process.env.REFRESH_TOKEN_SECRET,
+    {
+      expiresIn: "24h",
     }
   );
   await db.query(
     `UPDATE users
-    SET token = '${token}'
+    SET refresh_token = '${refreshToken}'
     WHERE email = '${user.email}';`
   );
   return res
-    .cookie("jwt", token, {
+    .cookie("jwt", refreshToken, {
       httpOnly: true,
       sameSite: "None",
       secure: true,
-      maxAge: 1000 * 60 * 60,
+      maxAge: 1000 * 300,
     })
-    .json({ message: "Login successful" });
+    .json({ accessToken });
 });
 
-app.get("/logout", cookieAuth, async (req, res) => {
-  const user = req.user;
+app.get("/refresh", async (req, res) => {
+  const cookies = req.cookies;
+  if (!cookies.jwt) {
+    return res.status(204).json({ message: "Refresh cookie empty" });
+  }
+  const refreshToken = cookies.jwt;
+  const userQ = await db.query(
+    `SELECT * FROM users WHERE refresh_token = '${refreshToken}'`
+  );
+  if (userQ.rows.length === 0) {
+    return res.status(400).json({ error: "No user refresh token match" });
+  }
+  const user = userQ.rows[0];
+  const accessToken = jwt.sign(
+    { email: user.email, username: user.username },
+    process.env.ACCESS_TOKEN_SECRET,
+    {
+      expiresIn: "300s",
+    }
+  );
+  return res.status(200).json({ accessToken });
+});
+
+app.get("/logout", async (req, res) => {
+  const cookies = req.cookies;
+  if (!cookies.jwt) {
+    return res.status(204).json({ message: "Refresh cookie already empty" });
+  }
+  const refreshToken = cookies.jwt;
+  const userQ = await db.query(
+    `SELECT * FROM users WHERE refresh_token = '${refreshToken}'`
+  );
+  if (userQ.rows.length === 0) {
+    return res
+      .status(204)
+      .clearCookie("jwt", { httpOnly: true, sameSite: "None", secure: true })
+      .json({ message: "No user refresh token match, cookie cleared" });
+  }
   await db.query(
     `UPDATE users 
-    SET token = NULL
-    WHERE email = '${user.email}';`
+    SET refresh_token = NULL
+    WHERE refresh_token = '${refreshToken}';`
   );
   return res
     .status(204)
@@ -134,7 +179,7 @@ app.get("/logout", cookieAuth, async (req, res) => {
     .json({ message: "User token cleared, cookie cleared" });
 });
 
-app.get("/account", cookieAuth, async (req, res) => {
+app.get("/account", verifyAccessToken, async (req, res) => {
   const user = req.user;
   const minesweeperScoresQ = await db.query(
     `SELECT score
@@ -162,12 +207,11 @@ app.get("/account", cookieAuth, async (req, res) => {
     .json({ email: user.email, username: user.username, scores });
 });
 
-app.post("/account", cookieAuth, async (req, res) => {
+app.post("/account", verifyAccessToken, async (req, res) => {
   const user = req.user;
   const alreadyExistsQ = await db.query(
     `SELECT * FROM users WHERE username='${req.body.username}'`
   );
-  console.log(req.body.username);
   if (!req.body.username) {
     return res.status(400).json({ error: "Username field is required" });
   }

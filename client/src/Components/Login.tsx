@@ -28,7 +28,6 @@ function Login() {
         }
       )
       .then(function (response) {
-        console.log(response);
         navigate("/");
       })
       .catch(function (error) {
@@ -37,7 +36,7 @@ function Login() {
   };
   return (
     <div>
-      <form onSubmit={(e) => handleSubmit(e)}>
+      <form onSubmit={e => handleSubmit(e)}>
         <input
           onChange={handleChange}
           name="email"
