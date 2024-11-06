@@ -1,8 +1,8 @@
-import { createBrowserRouter } from "react-router-dom";
 import React from "react";
+import { createBrowserRouter } from "react-router-dom";
 import Home from "../Components/Home";
 import SnakeGrid from "../Components/Snake/SnakeGrid";
-import MineGrid from "../Components/Mine/MineGrid";
+import MineGrid from "../Components/Minesweeper/MineGrid";
 import Leaderboard from "../Components/Leaderboard";
 import Login from "../Components/Login";
 import Register from "../Components/Register";

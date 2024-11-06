@@ -1,9 +1,9 @@
 import React, { useState } from "react";
-import "../App.css";
 import { router } from "../Routes/Routes";
 import { RouterProvider } from "react-router-dom";
-import NavBar from "./NavBar";
+import "../App.css";
 import axios from "axios";
+import NavBar from "./NavBar";
 
 function App() {
   const val = axios.get("/refresh");
